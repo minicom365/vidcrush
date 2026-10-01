@@ -19,6 +19,12 @@ from vidcrush import quality as Q
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
 
+#: Static ffmpeg builds often ship without --enable-libvmaf, so VMAF tests have
+#: to skip rather than fail.  SSIM and PSNR are always present.
+VMAF_AVAILABLE = bool(FFMPEG) and "vmaf" in Q.available_metrics(FFMPEG)
+
+needs_vmaf = pytest.mark.skipif(not VMAF_AVAILABLE, reason="ffmpeg lacks libvmaf")
+
 
 # ---------------------------------------------------------------------------
 # parsing
@@ -300,17 +306,20 @@ def _encode(path: Path, chain: list[str], qp: int, tmp: Path) -> Path:
 class TestAlignmentIntegration:
     CHAIN = ["setpts=0.500000*PTS"]
 
+    @needs_vmaf
     def test_lossless_through_the_same_chain_scores_near_perfect(self, patterned_clip, tmp_path):
         dist = _encode(patterned_clip, self.CHAIN, 0, tmp_path)
         report = Q.measure(patterned_clip, dist, self.CHAIN, metric="vmaf", ffmpeg=FFMPEG)
         assert report.score > 99.0, report
         assert report.frames > 0
 
+    @needs_vmaf
     def test_a_real_crf_encode_lands_in_a_sane_range(self, patterned_clip, tmp_path):
         dist = _encode(patterned_clip, self.CHAIN, 28, tmp_path)
         report = Q.measure(patterned_clip, dist, self.CHAIN, metric="vmaf", ffmpeg=FFMPEG)
         assert 70.0 < report.score < 99.0, report
 
+    @needs_vmaf
     def test_the_wrong_chain_scores_much_worse(self, patterned_clip, tmp_path):
         """Teeth: if the reference loses its re-timing the score collapses.
 
@@ -322,6 +331,14 @@ class TestAlignmentIntegration:
         misaligned = Q.measure(patterned_clip, dist, [], metric="vmaf", ffmpeg=FFMPEG)
         assert misaligned.score < aligned.score - 20.0, (misaligned.score, aligned.score)
 
+    def test_alignment_shows_up_in_ssim_too(self, patterned_clip, tmp_path):
+        """Same effect on a metric every ffmpeg build has, so CI keeps the guard."""
+        dist = _encode(patterned_clip, self.CHAIN, 0, tmp_path)
+        aligned = Q.measure(patterned_clip, dist, self.CHAIN, metric="ssim", ffmpeg=FFMPEG)
+        misaligned = Q.measure(patterned_clip, dist, [], metric="ssim", ffmpeg=FFMPEG)
+        assert aligned.score > 0.999, aligned
+        assert misaligned.score < aligned.score - 0.02, (misaligned.score, aligned.score)
+
     def test_ssim_agrees_that_the_lossless_case_is_perfect(self, patterned_clip, tmp_path):
         dist = _encode(patterned_clip, self.CHAIN, 0, tmp_path)
         report = Q.measure(patterned_clip, dist, self.CHAIN, metric="ssim", ffmpeg=FFMPEG)
@@ -332,6 +349,7 @@ class TestAlignmentIntegration:
         report = Q.measure(patterned_clip, dist, self.CHAIN, metric="psnr", ffmpeg=FFMPEG)
         assert 25.0 < report.score < 60.0, report
 
+    @needs_vmaf
     def test_reference_can_be_reused(self, patterned_clip, tmp_path):
         dist = _encode(patterned_clip, self.CHAIN, 28, tmp_path)
         reference = tmp_path / "shared_ref.mp4"
