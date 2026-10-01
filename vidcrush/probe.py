@@ -86,7 +86,7 @@ class MediaInfo:
         return data
 
     @classmethod
-    def from_ffprobe(cls, payload: dict, path: str | os.PathLike) -> "MediaInfo":
+    def from_ffprobe(cls, payload: dict, path: str | os.PathLike) -> MediaInfo:
         streams = payload.get("streams") or []
         fmt = payload.get("format") or {}
 
@@ -113,7 +113,9 @@ class MediaInfo:
         )
 
 
-def probe(path: str | os.PathLike, *, ffprobe: str | None = None, capture: bool = True) -> MediaInfo:
+def probe(
+    path: str | os.PathLike, *, ffprobe: str | None = None, capture: bool = True
+) -> MediaInfo:
     """Inspect *path* and return a :class:`MediaInfo`."""
     src = Path(path)
     if not src.exists():

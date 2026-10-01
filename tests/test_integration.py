@@ -56,18 +56,38 @@ def moving_clip(tmp_path_factory) -> Path:
 @pytest.fixture(scope="module")
 def static_clip(tmp_path_factory) -> Path:
     path = tmp_path_factory.mktemp("media") / "static.mp4"
-    return make_video(path, source="color=c=black:size=320x240:rate=30:duration=4", with_audio=False)
+    return make_video(
+        path, source="color=c=black:size=320x240:rate=30:duration=4", with_audio=False
+    )
 
 
 class TestSpeed:
     def test_halves_the_duration(self, moving_clip, tmp_path):
-        result = crush(moving_clip, CrushOptions(speed=2.0, output=tmp_path / "out.mp4"), quiet=True)
+        result = crush(
+            moving_clip, CrushOptions(speed=2.0, output=tmp_path / "out.mp4"), quiet=True
+        )
         assert result.output.duration == pytest.approx(2.0, abs=0.25)
         assert result.plan.info.duration == pytest.approx(4.0, abs=0.25)
         assert result.duration_ratio == pytest.approx(0.5, abs=0.1)
 
     def test_audio_survives_a_speed_change(self, moving_clip, tmp_path):
-        result = crush(moving_clip, CrushOptions(speed=2.0, output=tmp_path / "out.mp4"), quiet=True)
+        result = crush(
+            moving_clip, CrushOptions(speed=2.0, output=tmp_path / "out.mp4"), quiet=True
+        )
+        assert result.output.has_audio is True
+
+    def test_audio_survives_a_pure_reencode(self, moving_clip, tmp_path):
+        """No speed change, just a smaller file — the audio must still be there."""
+        result = crush(moving_clip, CrushOptions(crf=30, output=tmp_path / "out.mp4"), quiet=True)
+        assert result.output.has_audio is True
+        assert result.plan.audio_dropped is False
+
+    def test_audio_survives_a_speed_change_and_downscale(self, moving_clip, tmp_path):
+        result = crush(
+            moving_clip,
+            CrushOptions(speed=2.0, width=160, crf=30, output=tmp_path / "out.mp4"),
+            quiet=True,
+        )
         assert result.output.has_audio is True
 
     def test_duration_option_is_equivalent_to_speed(self, moving_clip, tmp_path):
@@ -128,7 +148,9 @@ class TestShrinking:
 class TestDropStatic:
     def test_freezes_are_removed(self, static_clip, tmp_path):
         before = probe(static_clip)
-        result = crush(static_clip, CrushOptions(drop_static=True, output=tmp_path / "out.mp4"), quiet=True)
+        result = crush(
+            static_clip, CrushOptions(drop_static=True, output=tmp_path / "out.mp4"), quiet=True
+        )
         assert result.output.duration < before.duration / 2
 
     def test_audio_is_dropped_and_flagged(self, moving_clip, tmp_path):

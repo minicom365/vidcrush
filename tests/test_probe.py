@@ -73,7 +73,15 @@ class TestFromFfprobe:
 
     def test_duration_falls_back_to_stream(self):
         payload = {
-            "streams": [{"codec_type": "video", "codec_name": "h264", "width": 2, "height": 2, "duration": "12.5"}],
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 2,
+                    "height": 2,
+                    "duration": "12.5",
+                }
+            ],
             "format": {},
         }
         assert MediaInfo.from_ffprobe(payload, "x.mp4").duration == 12.5

@@ -6,7 +6,7 @@ whole module cheap to unit-test.
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 from .errors import UsageError
 
@@ -129,7 +129,9 @@ def video_filters(
             raise UsageError(f"decimate frac must be in (0, 1], got {decimate_frac}")
         if decimate_lo > decimate_hi:
             raise UsageError("decimate_lo must be <= decimate_hi")
-        chain.append(f"mpdecimate=hi={int(decimate_hi)}:lo={int(decimate_lo)}:frac={float(decimate_frac):g}")
+        chain.append(
+            f"mpdecimate=hi={int(decimate_hi)}:lo={int(decimate_lo)}:frac={float(decimate_frac):g}"
+        )
         chain.append("setpts=N/FRAME_RATE/TB")
 
     speed = normalize_speed(speed)

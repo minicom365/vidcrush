@@ -155,6 +155,11 @@ def build_plan(
         allow_upscale=options.upscale,
     )
     audio_chain = F.audio_filters(speed) if keep_audio else []
+    if keep_audio and not audio_chain:
+        # No tempo change means there is nothing to re-time, but the audio still
+        # has to be mapped explicitly — `-map [v]` turns off ffmpeg's automatic
+        # stream selection, so leaving this empty silently drops the track.
+        audio_chain = ["anull"]
 
     dst_path = (
         Path(options.output)

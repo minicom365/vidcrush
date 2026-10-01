@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -10,7 +11,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import __version__, filters as F
+from . import __version__
+from . import filters as F
 from .core import CrushOptions, build_plan, execute
 from .errors import VidcrushError
 from .probe import MediaInfo, probe
@@ -119,17 +121,29 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("-y", "--force", action="store_true", help="overwrite an existing output file")
 
     timing = parser.add_mutually_exclusive_group()
-    timing.add_argument("-s", "--speed", type=float, help="playback speed multiplier, e.g. 2 (default: 1)")
+    timing.add_argument(
+        "-s", "--speed", type=float, help="playback speed multiplier, e.g. 2 (default: 1)"
+    )
     timing.add_argument("-d", "--duration", type=float, help="target duration in seconds")
 
     quality = parser.add_argument_group("quality")
-    quality.add_argument("--crf", type=int, default=28, help="x264/x265 CRF, lower is better (default: 28)")
-    quality.add_argument("--preset", default="medium", choices=PRESETS, help="x264/x265 preset (default: medium)")
-    quality.add_argument("-w", "--width", type=int, help="scale down to this width, keeping aspect ratio")
+    quality.add_argument(
+        "--crf", type=int, default=28, help="x264/x265 CRF, lower is better (default: 28)"
+    )
+    quality.add_argument(
+        "--preset", default="medium", choices=PRESETS, help="x264/x265 preset (default: medium)"
+    )
+    quality.add_argument(
+        "-w", "--width", type=int, help="scale down to this width, keeping aspect ratio"
+    )
     quality.add_argument("--max-height", type=int, help="shrink to at most this height")
-    quality.add_argument("--upscale", action="store_true", help="allow scaling above the source size")
+    quality.add_argument(
+        "--upscale", action="store_true", help="allow scaling above the source size"
+    )
     quality.add_argument("--fps", type=float, help="force an output frame rate")
-    quality.add_argument("--video-codec", default="libx264", help="video encoder (default: libx264)")
+    quality.add_argument(
+        "--video-codec", default="libx264", help="video encoder (default: libx264)"
+    )
 
     audio = parser.add_argument_group("audio")
     audio.add_argument("--audio-bitrate", default="128k", help="audio bitrate (default: 128k)")
@@ -137,10 +151,18 @@ def build_parser() -> argparse.ArgumentParser:
     audio.add_argument("--no-audio", action="store_true", help="drop the audio track entirely")
 
     trim = parser.add_argument_group("static-frame removal")
-    trim.add_argument("--drop-static", action="store_true", help="remove near-duplicate frames (mutes audio)")
-    trim.add_argument("--decimate-hi", type=int, default=768, help="mpdecimate hi threshold (default: 768)")
-    trim.add_argument("--decimate-lo", type=int, default=320, help="mpdecimate lo threshold (default: 320)")
-    trim.add_argument("--decimate-frac", type=float, default=0.33, help="mpdecimate frac (default: 0.33)")
+    trim.add_argument(
+        "--drop-static", action="store_true", help="remove near-duplicate frames (mutes audio)"
+    )
+    trim.add_argument(
+        "--decimate-hi", type=int, default=768, help="mpdecimate hi threshold (default: 768)"
+    )
+    trim.add_argument(
+        "--decimate-lo", type=int, default=320, help="mpdecimate lo threshold (default: 320)"
+    )
+    trim.add_argument(
+        "--decimate-frac", type=float, default=0.33, help="mpdecimate frac (default: 0.33)"
+    )
 
     misc = parser.add_argument_group("misc")
     misc.add_argument("--info", action="store_true", help="print media info and exit")
@@ -163,7 +185,7 @@ def _info_lines(info: MediaInfo) -> list[str]:
     rows = [
         ("path", str(info.path)),
         ("duration", format_duration(info.duration)),
-        ("size", f"{format_bytes(info.size)} ({info.size_mb:.1f} MB)"),
+        ("size", f"{format_bytes(info.size)} ({info.size:,} bytes)"),
         ("resolution", info.resolution),
         ("fps", f"{info.fps:g}"),
         ("bitrate", f"{info.bit_rate / 1000:.0f} kbps" if info.bit_rate else "?"),
@@ -178,12 +200,16 @@ def _print_plan(plan, *, quiet: bool) -> None:
     if quiet:
         return
     print(f"input     : {plan.src}")
-    print(f"            {plan.info.resolution} @ {plan.info.fps:g}fps, "
-          f"{format_duration(plan.info.duration)}, {format_bytes(plan.info.size)}")
+    print(
+        f"            {plan.info.resolution} @ {plan.info.fps:g}fps, "
+        f"{format_duration(plan.info.duration)}, {format_bytes(plan.info.size)}"
+    )
     print(f"output    : {plan.dst}")
     print(f"speed     : {plan.speed:g}x  -> about {format_duration(plan.estimated_duration)}")
-    print(f"filters   : v[{F.describe(plan.video_chain)}]"
-          + (f" a[{F.describe(plan.audio_chain)}]" if plan.audio_chain else " a[-]"))
+    print(
+        f"filters   : v[{F.describe(plan.video_chain)}]"
+        + (f" a[{F.describe(plan.audio_chain)}]" if plan.audio_chain else " a[-]")
+    )
     for warning in plan.warnings:
         print(f"warning   : {warning}", file=sys.stderr)
     print()
@@ -195,10 +221,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Never crash on a console that cannot represent a path.
     for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
-        except (AttributeError, ValueError):  # pragma: no cover - exotic streams
-            pass
+        with contextlib.suppress(AttributeError, ValueError):  # exotic streams
+            stream.reconfigure(errors="backslashreplace")
 
     try:
         info = probe(args.input, ffprobe=args.ffprobe)

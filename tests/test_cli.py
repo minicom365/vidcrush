@@ -41,6 +41,13 @@ class TestInfo:
         assert "2:20.9" in out
         assert "189.6 MB" in out
 
+    def test_info_size_line_is_not_duplicated(self, capsys):
+        cli.main(["clip.mp4", "--info"])
+        lines = capsys.readouterr().out.splitlines()
+        size_line = next(text for text in lines if text.startswith("size"))
+        assert size_line.count("MB") == 1
+        assert "bytes" in size_line
+
     def test_json(self, capsys):
         assert cli.main(["clip.mp4", "--info", "--json"]) == 0
         data = json.loads(capsys.readouterr().out)
@@ -89,7 +96,9 @@ class TestShellQuote:
         assert line == r"& 'C:\Program Files\ffmpeg.EXE' -i 'a b.mp4'"
 
     def test_powershell_skips_the_call_operator_for_bare_names(self):
-        assert cli.format_command(["ffmpeg", "-i", "a b.mp4"], "powershell") == "ffmpeg -i 'a b.mp4'"
+        assert (
+            cli.format_command(["ffmpeg", "-i", "a b.mp4"], "powershell") == "ffmpeg -i 'a b.mp4'"
+        )
 
     def test_cmd_never_uses_the_call_operator(self):
         line = cli.format_command([r"C:\Program Files\ffmpeg.EXE"], "cmd")

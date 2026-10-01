@@ -22,7 +22,9 @@ class TestEven:
 
 
 class TestAtempoFactors:
-    @pytest.mark.parametrize("speed", [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 7.5, 8.0, 10.0, 60.0])
+    @pytest.mark.parametrize(
+        "speed", [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 7.5, 8.0, 10.0, 60.0]
+    )
     def test_product_matches_speed(self, speed):
         factors = F.atempo_factors(speed)
         assert math.prod(factors) == pytest.approx(speed, rel=1e-4)

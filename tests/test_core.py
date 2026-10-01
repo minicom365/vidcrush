@@ -12,18 +12,18 @@ from vidcrush.probe import MediaInfo
 
 
 def make_info(**overrides) -> MediaInfo:
-    base = dict(
-        path=Path("in.mp4"),
-        duration=140.927979,
-        size=198_800_000,
-        bit_rate=11_287_694,
-        width=2560,
-        height=1032,
-        fps=30.0,
-        video_codec="h264",
-        audio_codec="aac",
-        nb_frames=4226,
-    )
+    base = {
+        "path": Path("in.mp4"),
+        "duration": 140.927979,
+        "size": 198_800_000,
+        "bit_rate": 11_287_694,
+        "width": 2560,
+        "height": 1032,
+        "fps": 30.0,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "nb_frames": 4226,
+    }
     base.update(overrides)
     return MediaInfo(**base)
 
@@ -84,8 +84,7 @@ class TestCommandBuilding:
         plan = build_plan("in.mp4", CrushOptions(speed=2.0, width=1920), info=make_info())
         graph = plan.cmd[plan.cmd.index("-filter_complex") + 1]
         assert graph.startswith(
-            "[0:v]setpts=0.500000*PTS,"
-            "scale='trunc(min(iw,1920)/2)*2':-2:flags=lanczos,setsar=1[v]"
+            "[0:v]setpts=0.500000*PTS,scale='trunc(min(iw,1920)/2)*2':-2:flags=lanczos,setsar=1[v]"
         )
         assert graph.endswith("[0:a]atempo=2[a]")
 
@@ -93,6 +92,27 @@ class TestCommandBuilding:
         plan = build_plan("in.mp4", CrushOptions(speed=2.0), info=make_info())
         assert plan.cmd.count("-map") == 2
         assert "[v]" in plan.cmd and "[a]" in plan.cmd
+
+    def test_audio_survives_a_pure_reencode(self):
+        """Regression: at speed 1.0 there is no atempo filter, so audio_chain
+        used to come back empty and build_plan emitted -an, silently dropping
+        the audio track of a plain `--crf 30` re-encode."""
+        plan = build_plan("in.mp4", CrushOptions(crf=30), info=make_info())
+        assert plan.audio_chain == ["anull"]
+        assert "-an" not in plan.cmd
+        assert plan.cmd.count("-map") == 2
+        assert plan.audio_dropped is False
+
+    def test_pure_reencode_graph_maps_audio(self):
+        plan = build_plan("in.mp4", CrushOptions(), info=make_info())
+        graph = plan.cmd[plan.cmd.index("-filter_complex") + 1]
+        assert graph == "[0:v]null[v];[0:a]anull[a]"
+
+    def test_silent_input_still_gets_an(self):
+        plan = build_plan("in.mp4", CrushOptions(crf=30), info=make_info(audio_codec=None))
+        assert plan.audio_chain == []
+        assert "-an" in plan.cmd
+        assert plan.cmd.count("-map") == 1
 
     def test_silent_input_maps_video_only(self):
         plan = build_plan("in.mp4", CrushOptions(speed=2.0), info=make_info(audio_codec=None))

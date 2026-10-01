@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from typing import Sequence
+from collections.abc import Sequence
 
 from .errors import FFmpegError, ToolNotFoundError
 

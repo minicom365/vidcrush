@@ -114,13 +114,15 @@ A few deliberate behaviours worth knowing:
 
 ```bash
 pip install -e ".[dev]"
-pytest
+pytest                    # 131 tests
+ruff check .              # lint
+ruff format --check .     # formatting
 ```
 
 - `tests/test_filters.py`, `test_probe.py`, `test_core.py`, `test_cli.py` are
   hermetic: no ffmpeg needed.
 - `tests/test_integration.py` generates synthetic clips with ffmpeg, crushes
-  them, and proves the duration and the byte count really went down.
+  them, and proves the duration, the byte count and the audio track survived.
 
 ---
 
