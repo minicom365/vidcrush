@@ -53,8 +53,16 @@ def run(
     *,
     capture: bool = True,
     check: bool = True,
+    cwd: str | os.PathLike | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run a command, raising :class:`FFmpegError` on a non-zero exit."""
+    """Run a command, raising :class:`FFmpegError` on a non-zero exit.
+
+    ``cwd`` matters more than it looks: filter options such as ``log_path=`` are
+    parsed by ffmpeg's *filtergraph* parser, which treats ``\\`` as an escape
+    character. A Windows absolute path therefore gets mangled and the log lands
+    somewhere unexpected. Running from the log's own directory and passing a
+    bare filename sidesteps the whole problem.
+    """
     proc = subprocess.run(
         list(cmd),
         stdout=subprocess.PIPE if capture else None,
@@ -63,6 +71,7 @@ def run(
         encoding="utf-8",
         errors="replace",
         check=False,
+        cwd=cwd,
     )
     if check and proc.returncode != 0:
         raise FFmpegError(proc.returncode, proc.stderr or "")

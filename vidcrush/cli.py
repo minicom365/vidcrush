@@ -13,8 +13,9 @@ from pathlib import Path
 
 from . import __version__
 from . import filters as F
+from . import quality as Q
 from .core import CrushOptions, build_plan, execute
-from .errors import VidcrushError
+from .errors import UsageError, VidcrushError
 from .probe import MediaInfo, probe
 
 PRESETS = [
@@ -164,6 +165,56 @@ def build_parser() -> argparse.ArgumentParser:
         "--decimate-frac", type=float, default=0.33, help="mpdecimate frac (default: 0.33)"
     )
 
+    measure = parser.add_argument_group("quality measurement")
+    measure.add_argument(
+        "--measure",
+        nargs="?",
+        const="vmaf",
+        choices=list(Q.SUPPORTED_METRICS),
+        help="measure the output against the source (default metric: vmaf)",
+    )
+    measure.add_argument(
+        "--measure-against",
+        metavar="FILE",
+        help="measure FILE against the input without encoding; the -s/-w flags "
+        "describe how FILE was produced",
+    )
+    measure.add_argument(
+        "--quality-target",
+        type=float,
+        metavar="SCORE",
+        help="trial-encode a probe clip and pick the smallest CRF that scores at least this",
+    )
+    measure.add_argument(
+        "--quality-metric",
+        default="vmaf",
+        choices=list(Q.SUPPORTED_METRICS),
+        help="metric used by --quality-target (default: vmaf)",
+    )
+    measure.add_argument(
+        "--vmaf-model",
+        help=f"VMAF model string (default: {Q.DEFAULT_VMAF_MODEL}); v1 models score "
+        "higher, so choose the target with the model in mind",
+    )
+    measure.add_argument(
+        "--crf-ladder",
+        default=",".join(str(c) for c in Q.DEFAULT_CRF_LADDER),
+        help="CRF candidates for --quality-target "
+        f"(default: {','.join(str(c) for c in Q.DEFAULT_CRF_LADDER)})",
+    )
+    measure.add_argument(
+        "--sample-window",
+        type=float,
+        default=10.0,
+        help="seconds per probe window (default: 10)",
+    )
+    measure.add_argument(
+        "--sample-count",
+        type=int,
+        default=3,
+        help="number of probe windows spread across the clip (default: 3)",
+    )
+
     misc = parser.add_argument_group("misc")
     misc.add_argument("--info", action="store_true", help="print media info and exit")
     misc.add_argument("--dry-run", action="store_true", help="print the ffmpeg command and exit")
@@ -215,6 +266,48 @@ def _print_plan(plan, *, quiet: bool) -> None:
     print()
 
 
+def _parse_ladder(text: str) -> list[int]:
+    crfs: list[int] = []
+    for chunk in text.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            crfs.append(int(chunk))
+        except ValueError as exc:
+            raise UsageError(f"--crf-ladder wants comma-separated integers, got {text!r}") from exc
+    if not crfs:
+        raise UsageError("--crf-ladder is empty")
+    return crfs
+
+
+def _print_quality(report: Q.QualityReport, *, label: str = "quality") -> None:
+    detail = f"{report.frames} frames"
+    if report.model:
+        detail += f", model {report.model}"
+    print(f"{label:<10}: {report.format_score()} ({detail})")
+
+
+def _print_search(outcome: Q.SearchOutcome, *, quiet: bool) -> None:
+    if quiet:
+        return
+    spans = ", ".join(f"{start:g}s+{length:g}s" for start, length in outcome.windows)
+    print(f"probe     : {spans}")
+    for candidate in outcome.candidates:
+        mark = "<-- chosen" if candidate.crf == outcome.chosen.crf else ""
+        print(
+            f"            crf {candidate.crf:>3}  {candidate.score:7.3f}  "
+            f"{format_bytes(candidate.size):>9}  {mark}"
+        )
+    if not outcome.hit_target:
+        print(
+            f"warning   : nothing in the ladder reached {outcome.target:g}; "
+            f"best was {outcome.chosen.score:.3f}",
+            file=sys.stderr,
+        )
+    print()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -255,6 +348,53 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
         )
 
+        measuring = bool(args.measure or args.measure_against or args.quality_target is not None)
+        if measuring and options.drop_static:
+            print(
+                "error: --drop-static cannot be measured (mpdecimate discards frames "
+                "non-deterministically)",
+                file=sys.stderr,
+            )
+            return 2
+
+        if args.measure_against:
+            metric = args.measure or args.quality_metric
+            plan = build_plan(
+                args.input, options, info=info, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe
+            )
+            report = Q.measure(
+                plan.src,
+                Path(args.measure_against),
+                plan.video_chain,
+                metric=metric,
+                model=args.vmaf_model,
+                video_codec=options.video_codec,
+                ffmpeg=args.ffmpeg,
+            )
+            if args.json:
+                print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+            else:
+                print(f"against   : {args.measure_against}")
+                _print_quality(report)
+            return 0
+
+        search = None
+        if args.quality_target is not None:
+            search = Q.search_crf(
+                args.input,
+                options,
+                target=args.quality_target,
+                metric=args.quality_metric,
+                model=args.vmaf_model,
+                ladder=_parse_ladder(args.crf_ladder),
+                window=args.sample_window,
+                window_count=args.sample_count,
+                ffmpeg=args.ffmpeg,
+                ffprobe=args.ffprobe,
+            )
+            _print_search(search, quiet=args.quiet or args.json)
+            options.crf = search.chosen.crf
+
         plan = build_plan(args.input, options, info=info, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
         _print_plan(plan, quiet=args.quiet or args.json)
 
@@ -269,8 +409,23 @@ def main(argv: list[str] | None = None) -> int:
 
         result = execute(plan, quiet=args.quiet or args.json, ffprobe=args.ffprobe)
 
+        quality_report = None
+        if args.measure:
+            quality_report = Q.measure_plan(
+                plan,
+                metric=args.measure,
+                model=args.vmaf_model,
+                video_codec=options.video_codec,
+                ffmpeg=args.ffmpeg,
+            )
+
         if args.json:
-            print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
+            payload = result.as_dict()
+            if search is not None:
+                payload["search"] = search.as_dict()
+            if quality_report is not None:
+                payload["quality"] = quality_report.as_dict()
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
 
         print(
@@ -280,6 +435,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"            {plan.dst}")
         print(f"            took {result.elapsed:.1f}s")
+        if quality_report is not None:
+            _print_quality(quality_report)
         return 0
 
     except VidcrushError as exc:

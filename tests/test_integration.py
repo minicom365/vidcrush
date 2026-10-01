@@ -175,6 +175,117 @@ class TestFailures:
         assert result.output.duration > 0
 
 
+class TestQualityCli:
+    def test_measure_reports_a_score_after_encoding(self, moving_clip, tmp_path, capsys):
+        from vidcrush import cli
+
+        code = cli.main(
+            [
+                str(moving_clip),
+                "-s",
+                "2",
+                "-o",
+                str(tmp_path / "o.mp4"),
+                "-y",
+                "-q",
+                "--measure",
+                "ssim",
+            ]
+        )
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "quality" in out and "ssim" not in out  # the score line is printed
+        assert "frames" in out
+
+    def test_measure_against_skips_encoding(self, moving_clip, tmp_path, capsys):
+        from vidcrush import cli
+
+        existing = tmp_path / "existing.mp4"
+        crush(moving_clip, CrushOptions(speed=2.0, output=existing), quiet=True)
+        capsys.readouterr()
+
+        code = cli.main([str(moving_clip), "-s", "2", "--measure-against", str(existing)])
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "against" in out
+        assert "quality" in out
+
+    def test_quality_target_picks_a_ladder_rung(self, moving_clip, tmp_path, capsys):
+        from vidcrush import cli
+
+        code = cli.main(
+            [
+                str(moving_clip),
+                "-o",
+                str(tmp_path / "o.mp4"),
+                "-y",
+                "--quality-target",
+                "0.80",
+                "--quality-metric",
+                "ssim",
+                "--crf-ladder",
+                "26,34",
+                "--sample-window",
+                "2",
+                "--sample-count",
+                "1",
+            ]
+        )
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "crf  26" in out or "crf  34" in out
+        assert "chosen" in out
+
+    def test_quality_target_and_drop_static_is_rejected(self, moving_clip, tmp_path, capsys):
+        from vidcrush import cli
+
+        code = cli.main(
+            [
+                str(moving_clip),
+                "--drop-static",
+                "--quality-target",
+                "90",
+                "-o",
+                str(tmp_path / "o.mp4"),
+            ]
+        )
+        assert code == 2
+        assert "drop-static" in capsys.readouterr().err
+
+    def test_measure_and_drop_static_is_rejected(self, moving_clip, tmp_path, capsys):
+        from vidcrush import cli
+
+        code = cli.main(
+            [str(moving_clip), "--drop-static", "--measure", "-o", str(tmp_path / "o.mp4")]
+        )
+        assert code == 2
+        assert "drop-static" in capsys.readouterr().err
+
+    def test_json_includes_the_quality_block(self, moving_clip, tmp_path, capsys):
+        import json as _json
+
+        from vidcrush import cli
+
+        code = cli.main(
+            [
+                str(moving_clip),
+                "-s",
+                "2",
+                "-o",
+                str(tmp_path / "o.mp4"),
+                "-y",
+                "-q",
+                "--json",
+                "--measure",
+                "psnr",
+            ]
+        )
+        assert code == 0
+        payload = _json.loads(capsys.readouterr().out)
+        assert payload["quality"]["metric"] == "psnr"
+        assert payload["quality"]["score"] > 0
+
+
 class TestCliRoundTrip:
     def test_cli_json_report(self, moving_clip, tmp_path, capsys):
         from vidcrush import cli
