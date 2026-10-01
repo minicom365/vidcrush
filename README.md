@@ -58,12 +58,44 @@ vidcrush "recording.mp4" -s 2 -w 1920 --crf 28
 # hit an exact target length instead of a speed multiplier
 vidcrush "lecture.mp4" -d 70 -w 1920
 
-# just a re-encode to shrink the file, same length
-vidcrush "clip.mp4" --crf 30
+# just a re-encode to shrink the file, same length, same timeline
+vidcrush "clip.mp4" --crf 32 --copy-audio
 
 # mostly-idle screen recording? drop the duplicate frames
 vidcrush "recording.mp4" --drop-static -s 2
 ```
+
+### Shrinking without touching the timeline
+
+With no `-s`/`-d`/`-w`/`--fps`/`--drop-static`, the video filter chain is empty
+(`[0:v]null[v]`) — the file is re-encoded at a higher CRF and nothing else
+changes. Measured on a 2560x1032 2m21s screen recording:
+
+```console
+$ vidcrush "recording.mp4" --crf 32 --copy-audio
+filters   : v[-] a[copy]
+done      : 2:20.9 (100% of original), 16.4 MB (8.6% of original)
+```
+
+| | original | result |
+| --- | --- | --- |
+| size | 189.6 MB | **16.4 MB** (8.6%) |
+| frames | 4226 | **4226** |
+| frame rate | 30/1 | **30/1** |
+| resolution | 2560x1032 | **2560x1032** |
+| duration | 140.927979 s | **140.928000 s** |
+| audio bitrate | 192 kbps | **192 kbps** |
+
+Metadata (`title`/`artist`/`comment`) and chapter markers are carried over too —
+ffmpeg copies them from the first input by default.
+
+**Pass `--copy-audio` for this workflow.** By default the audio is re-encoded,
+which costs you a second lossy generation and can even *grow* the file: a 64 kbps
+source re-encoded to the default `-b:a 128k` measured 105 kbps, and AAC padding
+nudged the duration from 4.000000 s to 4.017007 s. `--copy-audio` stream-copies
+the track instead, so the bitrate and the duration come through untouched. It
+needs `speed == 1`, since re-timing the video without re-timing the audio would
+drift them apart.
 
 ### Options
 
@@ -81,6 +113,7 @@ vidcrush "recording.mp4" --drop-static -s 2
 | `--fps` | source | Force an output frame rate |
 | `--audio-bitrate` | `128k` | Audio bitrate |
 | `--no-audio` | off | Drop the audio track |
+| `--copy-audio` | off | Stream-copy the audio instead of re-encoding (no speed change) |
 | `--drop-static` | off | Remove near-duplicate frames (**mutes audio**) |
 | `--info` | – | Print media info and exit |
 | `--dry-run` | – | Print the ffmpeg command and exit |
@@ -188,7 +221,7 @@ A few deliberate behaviours worth knowing:
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 178 tests
+pytest                    # 196 tests
 ruff check .              # lint
 ruff format --check .     # formatting
 ```
@@ -234,6 +267,25 @@ python -m vidcrush "recording.mp4" -s 2 --dry-run
 * 결과 파일이 이미 있으면 기본적으로 덮어쓰지 않습니다 (`-y` 필요).
 * `--dry-run`이 출력하는 명령은 **그대로 복사해서 실행 가능**합니다.
   PowerShell이면 `&` 호출 연산자까지 붙습니다 (`--shell`로 변경 가능).
+
+### 타임라인을 건드리지 않고 용량만 줄이기
+
+`-s` / `-d` / `-w` / `--fps` / `--drop-static` 을 **하나도 주지 않으면** 비디오 필터
+체인이 비어 있고(`[0:v]null[v]`), CRF만 올려 재인코딩합니다. 실측(2560x1032, 2분 21초):
+
+```powershell
+python -m vidcrush "recording.mp4" --crf 32 --copy-audio
+# → 189.6 MB → 16.4 MB (8.6%), 프레임 4226개 그대로, 길이 140.928초 그대로
+```
+
+프레임 수·fps·해상도·길이가 보존되고, `title`/`artist`/`comment` 메타데이터와
+**챕터 마커**도 그대로 넘어갑니다.
+
+★ 이 용도에서는 **`--copy-audio`를 쓰세요.** 기본값은 오디오를 재인코딩해서
+(1) 손실 세대가 하나 늘고 (2) 오히려 용량이 커질 수 있습니다 — 64 kbps 소스를 기본
+`-b:a 128k`로 다시 인코딩하면 실측 105 kbps가 되고, AAC 패딩 때문에 길이가 4.000000초
+→ 4.017007초로 밀립니다. `--copy-audio`는 트랙을 스트림 복사하므로 비트레이트와 길이가
+그대로입니다 (`speed == 1`일 때만 가능 — 영상만 재타이밍하면 어긋나기 때문).
 
 ### 품질 측정과 자동 CRF 선택
 

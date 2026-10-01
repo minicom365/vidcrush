@@ -124,6 +124,53 @@ class TestCommandBuilding:
         assert "-an" in plan.cmd
         assert any("audio removed" in w for w in plan.warnings)
 
+    def test_copy_audio_maps_the_source_track(self):
+        """A filtered stream cannot be copied, so the track bypasses the graph."""
+        plan = build_plan("in.mp4", CrushOptions(copy_audio=True), info=make_info())
+        assert plan.audio_chain == []
+        assert plan.audio_copied is True
+        assert plan.keeps_audio is True
+        assert plan.cmd.count("-map") == 2
+        assert "[v]" in plan.cmd
+        assert "0:a" in plan.cmd
+        assert plan.cmd[plan.cmd.index("-c:a") + 1] == "copy"
+        assert "-b:a" not in plan.cmd
+
+    def test_audio_codec_copy_is_the_same_thing(self):
+        plan = build_plan("in.mp4", CrushOptions(audio_codec="copy"), info=make_info())
+        assert plan.audio_copied is True
+        assert plan.audio_chain == []
+
+    def test_copy_audio_drops_the_filter_graph_for_audio(self):
+        plan = build_plan("in.mp4", CrushOptions(copy_audio=True), info=make_info())
+        graph = plan.cmd[plan.cmd.index("-filter_complex") + 1]
+        assert graph == "[0:v]null[v]"
+        assert "anull" not in graph
+
+    def test_copy_audio_rejects_a_speed_change(self):
+        with pytest.raises(UsageError, match="speed change"):
+            build_plan("in.mp4", CrushOptions(speed=2.0, copy_audio=True), info=make_info())
+
+    def test_drop_static_wins_over_copy_audio(self):
+        plan = build_plan(
+            "in.mp4", CrushOptions(drop_static=True, copy_audio=True), info=make_info()
+        )
+        assert plan.audio_copied is False
+        assert plan.keeps_audio is False
+        assert "-an" in plan.cmd
+        assert "copy" not in plan.cmd
+
+    def test_no_audio_wins_over_copy_audio(self):
+        plan = build_plan("in.mp4", CrushOptions(no_audio=True, copy_audio=True), info=make_info())
+        assert plan.audio_copied is False
+        assert "-an" in plan.cmd
+        assert plan.cmd.count("-map") == 1
+
+    def test_copy_audio_on_a_silent_source_maps_no_audio(self):
+        plan = build_plan("in.mp4", CrushOptions(copy_audio=True), info=make_info(audio_codec=None))
+        assert plan.audio_copied is False
+        assert "-an" in plan.cmd
+
     def test_drop_static_silently_disables_audio(self):
         plan = build_plan("in.mp4", CrushOptions(drop_static=True), info=make_info())
         assert plan.audio_chain == []

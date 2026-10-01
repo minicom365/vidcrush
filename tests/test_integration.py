@@ -6,6 +6,7 @@ probe the result to prove the length and the byte count actually went down.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -284,6 +285,165 @@ class TestQualityCli:
         payload = _json.loads(capsys.readouterr().out)
         assert payload["quality"]["metric"] == "psnr"
         assert payload["quality"]["score"] > 0
+
+
+class TestQualityOnlyMode:
+    """`--crf N` on its own must shrink the file without touching the timeline.
+
+    This is the "just make it smaller" workflow: no speed change, no scaling, no
+    frame dropping.  Everything a viewer or a downstream tool can observe about
+    the timeline and the container has to survive.
+    """
+
+    @pytest.fixture(scope="class")
+    def rich_clip(self, tmp_path_factory) -> Path:
+        """A clip with metadata, a chapter, 23.976 fps and low-bitrate audio."""
+        directory = tmp_path_factory.mktemp("qualityonly")
+        base = directory / "base.mp4"
+        meta = directory / "meta.txt"
+        meta.write_text(
+            ";FFMETADATA1\n"
+            "title=My Title\n"
+            "artist=Some Artist\n"
+            "comment=hello world\n"
+            "[CHAPTER]\n"
+            "TIMEBASE=1/1000\n"
+            "START=0\n"
+            "END=2200\n"
+            "title=Chapter One\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [
+                FFMPEG,
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=320x240:rate=24000/1001:duration=4",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=44100:duration=4",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "64k",
+                "-shortest",
+                str(base),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        rich = directory / "rich.mp4"
+        subprocess.run(
+            [
+                FFMPEG,
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(base),
+                "-i",
+                str(meta),
+                "-map",
+                "0",
+                "-map_metadata",
+                "1",
+                "-map_chapters",
+                "1",
+                "-c",
+                "copy",
+                str(rich),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return rich
+
+    @staticmethod
+    def _json(path: Path, *entries: str) -> dict:
+        proc = subprocess.run(
+            [FFPROBE, "-v", "error", "-of", "json", *entries, str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return json.loads(proc.stdout)
+
+    def test_frames_and_timing_are_untouched(self, rich_clip, tmp_path):
+        result = crush(rich_clip, CrushOptions(crf=30, output=tmp_path / "out.mp4"), quiet=True)
+        before, after = result.plan.info, result.output
+        assert after.nb_frames == before.nb_frames
+        assert after.fps == pytest.approx(before.fps)
+        assert (after.width, after.height) == (before.width, before.height)
+        assert after.duration == pytest.approx(before.duration, abs=0.05)
+
+    def test_no_video_filter_is_applied(self, rich_clip, tmp_path):
+        result = crush(rich_clip, CrushOptions(crf=30, output=tmp_path / "out.mp4"), quiet=True)
+        assert result.plan.video_chain == []
+        assert result.plan.speed == 1.0
+
+    def test_the_file_gets_smaller(self, rich_clip, tmp_path):
+        result = crush(rich_clip, CrushOptions(crf=30, output=tmp_path / "out.mp4"), quiet=True)
+        assert result.output.size < result.plan.info.size
+
+    def test_global_metadata_survives(self, rich_clip, tmp_path):
+        out = tmp_path / "out.mp4"
+        crush(rich_clip, CrushOptions(crf=30, output=out), quiet=True)
+        tags = self._json(out, "-show_entries", "format_tags")["format"]["tags"]
+        assert tags["title"] == "My Title"
+        assert tags["artist"] == "Some Artist"
+        assert tags["comment"] == "hello world"
+
+    def test_chapters_survive(self, rich_clip, tmp_path):
+        out = tmp_path / "out.mp4"
+        crush(rich_clip, CrushOptions(crf=30, output=out), quiet=True)
+        before = self._json(rich_clip, "-show_chapters")["chapters"]
+        after = self._json(out, "-show_chapters")["chapters"]
+        assert len(after) == len(before) == 1
+        assert after[0]["tags"]["title"] == "Chapter One"
+
+    def test_re_encoded_audio_changes_the_duration_slightly(self, rich_clip, tmp_path):
+        """Documents the cost of the default audio re-encode."""
+        out = tmp_path / "out.mp4"
+        result = crush(rich_clip, CrushOptions(crf=30, output=out), quiet=True)
+        assert result.output.duration > result.plan.info.duration
+
+    def test_copy_audio_keeps_the_track_bit_for_bit(self, rich_clip, tmp_path):
+        out = tmp_path / "copy.mp4"
+        result = crush(rich_clip, CrushOptions(crf=30, copy_audio=True, output=out), quiet=True)
+        assert result.plan.audio_copied is True
+        # A stream copy cannot pad or resample, so the duration is exact.
+        assert result.output.duration == pytest.approx(result.plan.info.duration, abs=0.001)
+
+        before = self._json(rich_clip, "-select_streams", "a", "-show_streams")["streams"][0]
+        after = self._json(out, "-select_streams", "a", "-show_streams")["streams"][0]
+        assert after["codec_name"] == before["codec_name"]
+        assert after["bit_rate"] == before["bit_rate"]
+        assert after["nb_frames"] == before["nb_frames"]
+
+    def test_copy_audio_still_preserves_metadata(self, rich_clip, tmp_path):
+        out = tmp_path / "copy.mp4"
+        crush(rich_clip, CrushOptions(crf=30, copy_audio=True, output=out), quiet=True)
+        tags = self._json(out, "-show_entries", "format_tags")["format"]["tags"]
+        assert tags["title"] == "My Title"
 
 
 class TestCliRoundTrip:

@@ -28,6 +28,7 @@ class CrushOptions:
     fps: float | None = None
     audio_bitrate: str = "128k"
     no_audio: bool = False
+    copy_audio: bool = False
     drop_static: bool = False
     decimate_hi: int = 768
     decimate_lo: int = 320
@@ -51,7 +52,13 @@ class Plan:
     audio_chain: list[str]
     cmd: list[str]
     audio_dropped: bool = False
+    audio_copied: bool = False
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def keeps_audio(self) -> bool:
+        """True when the output carries an audio track, however it got there."""
+        return bool(self.audio_chain) or self.audio_copied
 
     @property
     def estimated_duration(self) -> float:
@@ -131,7 +138,15 @@ def build_plan(
 
     warnings: list[str] = []
     audio_dropped = False
+    # `-c:a copy` is the ffmpeg idiom, so accept it as well as the flag.
+    audio_copied = options.copy_audio or options.audio_codec == "copy"
     keep_audio = info.has_audio and not options.no_audio
+
+    if audio_copied and speed != 1.0:
+        raise UsageError(
+            "--copy-audio cannot be combined with a speed change: the video gets "
+            "re-timed but a copied audio stream would not, so they drift apart"
+        )
 
     if options.drop_static and keep_audio:
         # Re-timing the video stream would slide the audio out of sync, and
@@ -154,12 +169,20 @@ def build_plan(
         decimate_frac=options.decimate_frac,
         allow_upscale=options.upscale,
     )
-    audio_chain = F.audio_filters(speed) if keep_audio else []
-    if keep_audio and not audio_chain:
-        # No tempo change means there is nothing to re-time, but the audio still
+    if keep_audio and audio_copied:
+        # A stream fed by a filtergraph cannot be copied
+        # ("Filtering and streamcopy cannot be used together"), so the track is
+        # mapped straight from the source instead of through an `anull`.
+        audio_chain: list[str] = []
+    elif keep_audio:
+        # With no tempo change there is nothing to re-time, but the track still
         # has to be mapped explicitly — `-map [v]` turns off ffmpeg's automatic
-        # stream selection, so leaving this empty silently drops the track.
-        audio_chain = ["anull"]
+        # stream selection, so leaving this empty silently drops the audio.
+        audio_chain = F.audio_filters(speed) or ["anull"]
+    else:
+        audio_chain = []
+
+    audio_copied = audio_copied and keep_audio
 
     dst_path = (
         Path(options.output)
@@ -186,6 +209,8 @@ def build_plan(
     ]
     if audio_chain:
         cmd += ["-map", "[a]"]
+    elif audio_copied:
+        cmd += ["-map", "0:a"]
 
     cmd += ["-c:v", options.video_codec]
     if options.video_codec in {"libx264", "libx265"}:
@@ -194,7 +219,9 @@ def build_plan(
         cmd += ["-crf", str(options.crf), "-b:v", "0"]
     cmd += ["-pix_fmt", "yuv420p"]
 
-    if audio_chain:
+    if audio_copied:
+        cmd += ["-c:a", "copy"]
+    elif audio_chain:
         cmd += ["-c:a", options.audio_codec, "-b:a", options.audio_bitrate]
     else:
         cmd += ["-an"]
@@ -213,6 +240,7 @@ def build_plan(
         audio_chain=audio_chain,
         cmd=cmd,
         audio_dropped=audio_dropped,
+        audio_copied=audio_copied,
         warnings=warnings,
     )
 

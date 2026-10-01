@@ -150,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
     audio.add_argument("--audio-bitrate", default="128k", help="audio bitrate (default: 128k)")
     audio.add_argument("--audio-codec", default="aac", help="audio encoder (default: aac)")
     audio.add_argument("--no-audio", action="store_true", help="drop the audio track entirely")
+    audio.add_argument(
+        "--copy-audio",
+        action="store_true",
+        help="stream-copy the audio instead of re-encoding it; requires no speed change",
+    )
 
     trim = parser.add_argument_group("static-frame removal")
     trim.add_argument(
@@ -257,10 +262,13 @@ def _print_plan(plan, *, quiet: bool) -> None:
     )
     print(f"output    : {plan.dst}")
     print(f"speed     : {plan.speed:g}x  -> about {format_duration(plan.estimated_duration)}")
-    print(
-        f"filters   : v[{F.describe(plan.video_chain)}]"
-        + (f" a[{F.describe(plan.audio_chain)}]" if plan.audio_chain else " a[-]")
-    )
+    if plan.audio_chain:
+        audio_desc = f"a[{F.describe(plan.audio_chain)}]"
+    elif plan.audio_copied:
+        audio_desc = "a[copy]"
+    else:
+        audio_desc = "a[-]"
+    print(f"filters   : v[{F.describe(plan.video_chain)}] {audio_desc}")
     for warning in plan.warnings:
         print(f"warning   : {warning}", file=sys.stderr)
     print()
@@ -338,6 +346,7 @@ def main(argv: list[str] | None = None) -> int:
             fps=args.fps,
             audio_bitrate=args.audio_bitrate,
             no_audio=args.no_audio,
+            copy_audio=args.copy_audio,
             drop_static=args.drop_static,
             decimate_hi=args.decimate_hi,
             decimate_lo=args.decimate_lo,

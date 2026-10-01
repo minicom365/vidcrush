@@ -121,6 +121,16 @@ class TestDryRun:
         cli.main(["clip.mp4", "-w", "1920", "--upscale", "--dry-run"])
         assert "scale=1920:-2:flags=lanczos" in capsys.readouterr().out
 
+    def test_copy_audio_shows_up_in_the_plan(self, capsys):
+        cli.main(["clip.mp4", "--crf", "30", "--copy-audio", "--dry-run"])
+        out = capsys.readouterr().out
+        assert "a[copy]" in out
+        assert "-c:a copy" in out
+
+    def test_copy_audio_with_speed_is_rejected(self, capsys):
+        assert cli.main(["clip.mp4", "-s", "2", "--copy-audio", "--dry-run"]) == 1
+        assert "speed change" in capsys.readouterr().err
+
     def test_shell_option_selects_the_quoting_style(self, capsys):
         cli.main(["clip.mp4", "-s", "2", "--dry-run", "--shell", "cmd"])
         last = capsys.readouterr().out.strip().splitlines()[-1]
