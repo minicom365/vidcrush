@@ -91,11 +91,12 @@ ffmpeg copies them from the first input by default.
 
 **Pass `--copy-audio` for this workflow.** By default the audio is re-encoded,
 which costs you a second lossy generation and can even *grow* the file: a 64 kbps
-source re-encoded to the default `-b:a 128k` measured 105 kbps, and AAC padding
-nudged the duration from 4.000000 s to 4.017007 s. `--copy-audio` stream-copies
-the track instead, so the bitrate and the duration come through untouched. It
-needs `speed == 1`, since re-timing the video without re-timing the audio would
-drift them apart.
+source re-encoded to the default `-b:a 128k` measured 105 kbps on this machine,
+and AAC padding nudged the duration from 4.000000 s to 4.017007 s (how much
+padding you get is build-dependent; the extra lossy generation is not).
+`--copy-audio` stream-copies the track instead, so the bitrate and the duration
+come through untouched. It needs `speed == 1`, since re-timing the video without
+re-timing the audio would drift them apart.
 
 ### Options
 
@@ -283,9 +284,11 @@ python -m vidcrush "recording.mp4" --crf 32 --copy-audio
 
 ★ 이 용도에서는 **`--copy-audio`를 쓰세요.** 기본값은 오디오를 재인코딩해서
 (1) 손실 세대가 하나 늘고 (2) 오히려 용량이 커질 수 있습니다 — 64 kbps 소스를 기본
-`-b:a 128k`로 다시 인코딩하면 실측 105 kbps가 되고, AAC 패딩 때문에 길이가 4.000000초
-→ 4.017007초로 밀립니다. `--copy-audio`는 트랙을 스트림 복사하므로 비트레이트와 길이가
-그대로입니다 (`speed == 1`일 때만 가능 — 영상만 재타이밍하면 어긋나기 때문).
+`-b:a 128k`로 다시 인코딩하면 이 장비 기준 실측 105 kbps가 됩니다. AAC 패딩으로
+길이가 4.000000초 → 4.017007초로 밀리기도 하는데, **패딩 정도는 ffmpeg 빌드에 따라
+다릅니다** (손실 세대 증가는 빌드와 무관). `--copy-audio`는 트랙을 스트림 복사하므로
+비트레이트와 길이가 그대로입니다 (`speed == 1`일 때만 가능 — 영상만 재타이밍하면
+어긋나기 때문).
 
 ### 품질 측정과 자동 CRF 선택
 

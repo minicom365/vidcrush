@@ -420,12 +420,6 @@ class TestQualityOnlyMode:
         assert len(after) == len(before) == 1
         assert after[0]["tags"]["title"] == "Chapter One"
 
-    def test_re_encoded_audio_changes_the_duration_slightly(self, rich_clip, tmp_path):
-        """Documents the cost of the default audio re-encode."""
-        out = tmp_path / "out.mp4"
-        result = crush(rich_clip, CrushOptions(crf=30, output=out), quiet=True)
-        assert result.output.duration > result.plan.info.duration
-
     def test_copy_audio_keeps_the_track_bit_for_bit(self, rich_clip, tmp_path):
         out = tmp_path / "copy.mp4"
         result = crush(rich_clip, CrushOptions(crf=30, copy_audio=True, output=out), quiet=True)
