@@ -1,5 +1,9 @@
 # vidcrush
 
+[![CI](https://github.com/minicom365/vidcrush/actions/workflows/ci.yml/badge.svg)](https://github.com/minicom365/vidcrush/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Speed up and shrink videos with ffmpeg — one command, no configuration.
 
 Built for the case that ffmpeg's documentation makes surprisingly annoying:
@@ -123,6 +127,12 @@ ruff format --check .     # formatting
   hermetic: no ffmpeg needed.
 - `tests/test_integration.py` generates synthetic clips with ffmpeg, crushes
   them, and proves the duration, the byte count and the audio track survived.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
